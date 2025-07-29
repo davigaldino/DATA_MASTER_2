@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'django_filters',
     'apps.stocks',
     'apps.dashboard',
+    'apps.etl_demo',
 ]
 
 MIDDLEWARE = [
@@ -208,4 +209,9 @@ LOGGING = {
 }
 
 # Cria diretório de logs se não existir
-os.makedirs(BASE_DIR / 'logs', exist_ok=True) 
+os.makedirs(BASE_DIR / 'logs', exist_ok=True)
+
+# Configurações para upload de arquivos grandes
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100MB 

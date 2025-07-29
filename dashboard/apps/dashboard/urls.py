@@ -9,7 +9,7 @@ from django.urls import path
 from . import views, etl_views
 
 urlpatterns = [
-    path('', views.dashboard_home, name='dashboard_home'),
+    path('', views.dashboard_home, name='dashboard'),
     path('api/', views.dashboard_api, name='dashboard_api'),
     path('etl/', etl_views.etl_dashboard, name='etl_dashboard'),
     path('etl/start/', etl_views.start_etl, name='start_etl'),
