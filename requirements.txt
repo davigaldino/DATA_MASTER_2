@@ -1,46 +1,36 @@
-# Django e Framework Web
+# Core Dependencies
 Django==4.2.7
 djangorestframework==3.14.0
 django-cors-headers==4.3.1
-django-filter==23.3
-
-# Dash e Visualização
-dash==2.14.2
-plotly==5.17.0
-dash-bootstrap-components==1.5.0
-
-# Processamento de Dados
-pandas==2.1.4
-numpy==1.24.4
-yfinance==0.2.28
-
-# Banco de Dados
-psycopg2-binary==2.9.9
-SQLAlchemy==1.4.53
-
-# Orquestração
-apache-airflow==2.7.3
-apache-airflow-providers-postgres==5.7.1
-
-# Segurança e Autenticação
-PyJWT==2.8.0
-cryptography==39.0.2
 python-dotenv==1.0.0
 
-# Logging e Observabilidade
-structlog==23.2.0
-python-json-logger==2.0.7
+# Data Processing
+pandas==2.0.3
+numpy==1.24.3
+yfinance==0.2.18
 
-# Utilitários
+# Database
+psycopg2-binary==2.9.7
+SQLAlchemy==1.4.53
+pymongo==4.5.0
+
+# Visualization
+dash==2.14.1
+plotly==5.17.0
+
+# Logging and Monitoring
+structlog==23.1.0
+
+# Security
+cryptography==39.0.2
+
+# Orchestration
+apache-airflow==2.7.1
+
+# Development and Testing
+pytest==7.4.2
+pytest-django==4.5.2
+
+# Utilities
 requests==2.31.0
-python-dateutil==2.8.2
-pytz==2023.3
-
-# Desenvolvimento e Testes
-pytest==7.4.3
-pytest-django==4.7.0
-black==23.11.0
-flake8==6.1.0
-
-# Docker e Infraestrutura
-gunicorn==21.2.0 
+python-dateutil==2.8.2 
