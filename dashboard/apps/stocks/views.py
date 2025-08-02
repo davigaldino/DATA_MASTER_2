@@ -186,6 +186,7 @@ class StockDataViewSet(viewsets.ReadOnlyModelViewSet):
             ticker = request.query_params.get('ticker')
             start_date = request.query_params.get('start_date')
             end_date = request.query_params.get('end_date')
+            period = request.query_params.get('period')  # Novo parâmetro
             
             if not ticker:
                 return Response(
@@ -195,10 +196,46 @@ class StockDataViewSet(viewsets.ReadOnlyModelViewSet):
             
             # Filtra dados
             queryset = StockData.objects.filter(ticker=ticker)
+            
+            # Se não temos start_date/end_date mas temos period, calcular
+            if not start_date and not end_date and period:
+                from datetime import datetime, timedelta
+                
+                # Usar 2017 como referência
+                base_date = datetime(2017, 12, 31)
+                
+                if period == '1m':
+                    start_date = (base_date - timedelta(days=30)).date()
+                elif period == '3m':
+                    start_date = (base_date - timedelta(days=90)).date()
+                elif period == '6m':
+                    start_date = (base_date - timedelta(days=180)).date()
+                elif period == '1y':
+                    start_date = (base_date - timedelta(days=365)).date()
+                elif period == '2y':
+                    start_date = (base_date - timedelta(days=730)).date()
+                elif period == '5y':
+                    start_date = (base_date - timedelta(days=1825)).date()
+                else:
+                    start_date = (base_date - timedelta(days=365)).date()
+                
+                end_date = base_date.date()
+            
+            # Log para debug
+            print(f"Filtrando dados para {ticker}")
+            print(f"Período solicitado: {start_date} a {end_date}")
+            print(f"Period parameter: {period}")
+            
             if start_date:
                 queryset = queryset.filter(date__gte=start_date)
             if end_date:
                 queryset = queryset.filter(date__lte=end_date)
+            
+            # Log do resultado
+            print(f"Registros encontrados: {queryset.count()}")
+            if queryset.exists():
+                print(f"Primeira data: {queryset.first().date}")
+                print(f"Última data: {queryset.last().date}")
             
             # Ordena por data
             queryset = queryset.order_by('date')

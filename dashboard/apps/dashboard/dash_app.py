@@ -31,6 +31,7 @@ def create_dash_app(server):
     Returns:
         dash.Dash: Aplicação Dash configurada
     """
+    print("=== CREATING DASH APP ===")
     
     # Cria a aplicação Dash
     dash_app = dash.Dash(
@@ -66,8 +67,17 @@ def create_dash_app(server):
             
             html.Div([
                 html.Label("Período:", className="form-label"),
-                dcc.DatePickerRange(
-                    id='date-range',
+                dcc.Dropdown(
+                    id='period-dropdown',
+                    options=[
+                        {'label': '1 Mês', 'value': '1m'},
+                        {'label': '3 Meses', 'value': '3m'},
+                        {'label': '6 Meses', 'value': '6m'},
+                        {'label': '1 Ano', 'value': '1y'},
+                        {'label': '2 Anos', 'value': '2y'},
+                        {'label': '5 Anos', 'value': '5y'}
+                    ],
+                    value='1y',
                     className="mb-3"
                 )
             ], className="col-md-4"),
@@ -142,12 +152,68 @@ def create_dash_app(server):
 
 
 # Callbacks
+
+@callback(
+    Output('chart-data-store', 'data'),
+    Input('period-dropdown', 'value'),
+    Input('ticker-dropdown', 'value')
+)
+def update_data_on_period_change(period, ticker):
+    """Atualiza dados quando o período ou ticker muda."""
+    print(f"=== CALLBACK EXECUTED ===")
+    print(f"period: {period}")
+    print(f"ticker: {ticker}")
+    print(f"period type: {type(period)}")
+    print(f"ticker type: {type(ticker)}")
+    
+    if not ticker or not period:
+        print("Retornando vazio - ticker ou period não fornecidos")
+        return {}
+    
+    # Calcular datas baseado no período selecionado
+    base_date = datetime(2017, 12, 31)  # Fim de 2017
+    
+    if period == '1m':
+        start_date = base_date - timedelta(days=30)
+    elif period == '3m':
+        start_date = base_date - timedelta(days=90)
+    elif period == '6m':
+        start_date = base_date - timedelta(days=180)
+    elif period == '1y':
+        start_date = base_date - timedelta(days=365)
+    elif period == '2y':
+        start_date = base_date - timedelta(days=730)
+    elif period == '5y':
+        start_date = base_date - timedelta(days=1825)
+    else:
+        start_date = base_date - timedelta(days=365)
+    
+    start_date = start_date.date()
+    end_date = base_date.date()
+    
+    print(f"Calculated dates: {start_date} to {end_date}")
+    
+    try:
+        # Buscar dados reais da API Django usando o parâmetro period
+        data = fetch_real_data(ticker, period=period)
+        
+        if not data:
+            # Fallback para dados simulados
+            print("API não disponível, usando dados simulados")
+            data = generate_sample_data(ticker, start_date, end_date)
+        
+        return data
+    except Exception as e:
+        print(f"Erro ao carregar dados: {e}")
+        return generate_sample_data(ticker, start_date, end_date)
 @callback(
     Output('ticker-dropdown', 'options'),
     Output('ticker-dropdown', 'value'),
     Input('update-button', 'n_clicks')
 )
 def update_ticker_options(n_clicks):
+    print(f"=== update_ticker_options called ===")
+    print(f"n_clicks: {n_clicks}")
     """Atualiza as opções de tickers disponíveis."""
     try:
         # Em produção, isso seria uma chamada para a API
@@ -165,50 +231,13 @@ def update_ticker_options(n_clicks):
         return [], None
 
 
-@callback(
-    Output('date-range', 'start_date'),
-    Output('date-range', 'end_date'),
-    Input('ticker-dropdown', 'value')
-)
-def update_date_range(ticker):
-    """Atualiza o período disponível para o ticker selecionado."""
-    if not ticker:
-        return None, None
-    
-    # Em produção, isso seria uma chamada para a API
-    # Por enquanto, retorna período fixo
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=365)
-    
-    return start_date.date(), end_date.date()
 
 
-@callback(
-    Output('chart-data-store', 'data'),
-    Input('update-button', 'n_clicks'),
-    Input('ticker-dropdown', 'value'),
-    Input('date-range', 'start_date'),
-    Input('date-range', 'end_date')
-)
-def load_chart_data(n_clicks, ticker, start_date, end_date):
-    """Carrega dados para os gráficos."""
-    if not ticker or not start_date or not end_date:
-        return {}
-    
-    try:
-        # Tentar buscar dados reais da API Django
-        data = fetch_real_data(ticker, start_date, end_date)
-        
-        if not data:
-            # Fallback para dados simulados se a API não estiver disponível
-            print("API não disponível, usando dados simulados")
-            data = generate_sample_data(ticker, start_date, end_date)
-        
-        return data
-    except Exception as e:
-        print(f"Erro ao carregar dados: {e}")
-        # Fallback para dados simulados
-        return generate_sample_data(ticker, start_date, end_date)
+
+
+
+
+
 
 
 @callback(
@@ -606,7 +635,7 @@ def update_stats(data):
         return []
 
 
-def fetch_real_data(ticker, start_date, end_date):
+def fetch_real_data(ticker, start_date=None, end_date=None, period=None):
     """Busca dados reais da API Django."""
     try:
         # Configurar URL da API
@@ -615,16 +644,36 @@ def fetch_real_data(ticker, start_date, end_date):
         # Parâmetros da requisição
         params = {
             'ticker': ticker,
-            'start_date': start_date,
-            'end_date': end_date,
             'format': 'json'
         }
+        
+        # Adicionar parâmetros se fornecidos
+        if start_date:
+            params['start_date'] = start_date
+        if end_date:
+            params['end_date'] = end_date
+        if period:
+            params['period'] = period
+        
+        # Log para debug
+        print(f"=== DEBUG: fetch_real_data ===")
+        print(f"Ticker: {ticker}")
+        print(f"Start Date: {start_date}")
+        print(f"End Date: {end_date}")
+        print(f"API URL: {api_base_url}/stocks/with_indicators/")
+        print(f"Params: {params}")
         
         # Fazer requisição para a API - URL com indicadores
         response = requests.get(f"{api_base_url}/stocks/with_indicators/", params=params, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
+            
+            print(f"Response Status: {response.status_code}")
+            print(f"Data received: {len(data) if data else 0} records")
+            if data:
+                print(f"First record date: {data[0]['date']}")
+                print(f"Last record date: {data[-1]['date']}")
             
             if data:
                 # Converter para formato esperado pelo dashboard
