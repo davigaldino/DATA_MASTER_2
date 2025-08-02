@@ -47,7 +47,7 @@ def create_dash_app(server):
     dash_app.layout = html.Div([
         # Header
         html.Div([
-            html.H1("Data Master 2 - Análise de Ações B3", 
+            html.H1("AlphaScan - Análise de Ações B3", 
                    className="text-center mb-4 text-primary"),
             html.P("Dashboard interativo para análise de dados históricos da Bolsa Brasileira",
                    className="text-center text-muted mb-4")

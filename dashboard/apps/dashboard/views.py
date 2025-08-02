@@ -24,7 +24,7 @@ def dashboard_home(request):
     """
     try:
         context = {
-            'title': 'Data Master 2 - Dashboard',
+            'title': 'AlphaScan - Dashboard',
             'user': request.user,
         }
         return render(request, 'dashboard/home.html', context)

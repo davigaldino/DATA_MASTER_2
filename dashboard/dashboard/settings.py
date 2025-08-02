@@ -211,6 +211,10 @@ LOGGING = {
 # Cria diretório de logs se não existir
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)
 
+# Configurações de autenticação
+LOGIN_REDIRECT_URL = '/dashboard/'
+LOGOUT_REDIRECT_URL = '/accounts/login/'
+
 # Configurações para upload de arquivos grandes
 DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
