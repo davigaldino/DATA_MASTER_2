@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'apps.stocks',
     'apps.dashboard',
     'apps.etl_demo',
+    'apps.airflow_demo',
 ]
 
 MIDDLEWARE = [

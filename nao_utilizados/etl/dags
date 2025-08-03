@@ -1,0 +1,280 @@
+"""
+DAG real do Apache Airflow para processar dados reais da B3
+"""
+
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+import pandas as pd
+import numpy as np
+import psycopg2
+import os
+import sys
+
+# Adicionar o diretório do projeto ao path
+sys.path.append('/opt/airflow/etl')
+
+# Argumentos padrão do DAG
+default_args = {
+    'owner': 'data_engineering',
+    'depends_on_past': False,
+    'start_date': datetime(2024, 1, 1),
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+}
+
+# Criar o DAG
+dag = DAG(
+    'b3_real_etl_pipeline',
+    default_args=default_args,
+    description='Pipeline ETL real para dados da B3 - Processa CSV real',
+    schedule_interval='0 2 * * *',  # Executar diariamente às 2h da manhã
+    catchup=False,
+    tags=['b3', 'etl', 'stocks', 'brazil', 'real'],
+)
+
+def extract_real_data(**context):
+    """Extrai dados reais do arquivo CSV da B3"""
+    print("🔄 [EXTRACT] Iniciando extração de dados reais da B3...")
+    
+    try:
+        # Caminho para o arquivo CSV real
+        csv_path = '/opt/airflow/etl/data/b3_stocks_1994_2020.csv'
+        
+        if not os.path.exists(csv_path):
+            print(f"❌ [EXTRACT] Arquivo não encontrado: {csv_path}")
+            # Tentar caminho alternativo
+            csv_path = '/app/data/b3_stocks_1994_2020.csv'
+            if not os.path.exists(csv_path):
+                raise FileNotFoundError(f"Arquivo CSV não encontrado em {csv_path}")
+        
+        print(f"📁 [EXTRACT] Lendo arquivo: {csv_path}")
+        
+        # Ler o CSV real
+        df = pd.read_csv(csv_path)
+        
+        print(f"✅ [EXTRACT] Extração concluída: {len(df)} registros")
+        print(f"📊 [EXTRACT] Colunas: {list(df.columns)}")
+        print(f"📅 [EXTRACT] Período: {df['Date'].min()} a {df['Date'].max()}")
+        print(f"🏢 [EXTRACT] Tickers únicos: {df['Ticker'].nunique()}")
+        
+        # Salvar dados para próxima tarefa
+        context['task_instance'].xcom_push(key='extracted_data', value=df.to_json())
+        
+        return f"Extraídos {len(df)} registros reais da B3"
+        
+    except Exception as e:
+        print(f"❌ [EXTRACT] Erro na extração: {str(e)}")
+        raise
+
+def transform_real_data(**context):
+    """Transforma dados reais e calcula indicadores técnicos"""
+    print("🔄 [TRANSFORM] Iniciando transformação de dados reais...")
+    
+    try:
+        # Obter dados da tarefa anterior
+        data_json = context['task_instance'].xcom_pull(task_ids='extract_real_data', key='extracted_data')
+        df = pd.read_json(data_json)
+        
+        print(f"📊 [TRANSFORM] Processando {len(df)} registros")
+        
+        # Converter coluna de data
+        df['Date'] = pd.to_datetime(df['Date'])
+        
+        # Ordenar por ticker e data
+        df = df.sort_values(['Ticker', 'Date'])
+        
+        # Calcular indicadores técnicos para cada ticker
+        print("🔄 [TRANSFORM] Calculando indicadores técnicos...")
+        
+        indicators_data = []
+        
+        for ticker in df['Ticker'].unique():
+            ticker_data = df[df['Ticker'] == ticker].copy()
+            
+            if len(ticker_data) > 0:
+                # Médias móveis
+                ticker_data['close_ma_20'] = ticker_data['Close'].rolling(window=20).mean()
+                ticker_data['close_ma_50'] = ticker_data['Close'].rolling(window=50).mean()
+                ticker_data['volume_ma_10'] = ticker_data['Volume'].rolling(window=10).mean()
+                
+                # RSI (Relative Strength Index)
+                delta = ticker_data['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                ticker_data['rsi'] = 100 - (100 / (1 + rs))
+                
+                # MACD
+                exp1 = ticker_data['Close'].ewm(span=12).mean()
+                exp2 = ticker_data['Close'].ewm(span=26).mean()
+                ticker_data['macd'] = exp1 - exp2
+                ticker_data['macd_signal'] = ticker_data['macd'].ewm(span=9).mean()
+                
+                # Bandas de Bollinger
+                ticker_data['bb_middle'] = ticker_data['Close'].rolling(window=20).mean()
+                bb_std = ticker_data['Close'].rolling(window=20).std()
+                ticker_data['bb_upper'] = ticker_data['bb_middle'] + (bb_std * 2)
+                ticker_data['bb_lower'] = ticker_data['bb_middle'] - (bb_std * 2)
+                
+                # Adicionar à lista de indicadores
+                indicators_data.append(ticker_data)
+        
+        # Combinar todos os dados
+        df_final = pd.concat(indicators_data, ignore_index=True)
+        
+        # Remover linhas com NaN
+        df_clean = df_final.dropna()
+        
+        print(f"✅ [TRANSFORM] Transformação concluída: {len(df_clean)} registros válidos")
+        print(f"📊 [TRANSFORM] Indicadores calculados: Médias móveis, RSI, MACD, Bandas de Bollinger")
+        
+        # Salvar dados para próxima tarefa
+        context['task_instance'].xcom_push(key='transformed_data', value=df_clean.to_json())
+        
+        return f"Transformados {len(df_clean)} registros com indicadores técnicos"
+        
+    except Exception as e:
+        print(f"❌ [TRANSFORM] Erro na transformação: {str(e)}")
+        raise
+
+def load_real_data(**context):
+    """Carrega dados reais no banco PostgreSQL"""
+    print("🔄 [LOAD] Iniciando carregamento de dados reais no PostgreSQL...")
+    
+    try:
+        # Obter dados da tarefa anterior
+        data_json = context['task_instance'].xcom_pull(task_ids='transform_real_data', key='transformed_data')
+        df = pd.read_json(data_json)
+        
+        print(f"📊 [LOAD] Dados para carregar:")
+        print(f"   - Tickers: {df['Ticker'].nunique()}")
+        print(f"   - Período: {df['Date'].min()} a {df['Date'].max()}")
+        print(f"   - Registros: {len(df)}")
+        print(f"   - Preço médio: R$ {df['Close'].mean():.2f}")
+        print(f"   - Volume médio: {df['Volume'].mean():,.0f}")
+        
+        # Conectar ao PostgreSQL
+        conn = psycopg2.connect(
+            host='postgres',
+            port='5432',
+            database='datamaster2',
+            user='postgres',
+            password='password'
+        )
+        
+        cursor = conn.cursor()
+        
+        # Limpar tabelas existentes
+        print("🔄 [LOAD] Limpando tabelas existentes...")
+        cursor.execute("TRUNCATE TABLE technical_indicators CASCADE")
+        cursor.execute("TRUNCATE TABLE stock_data CASCADE")
+        
+        # Inserir dados de ações
+        print("🔄 [LOAD] Inserindo dados de ações...")
+        for _, row in df.iterrows():
+            cursor.execute("""
+                INSERT INTO stock_data (date, ticker, open, high, low, close, volume, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            """, (
+                row['Date'].date(),
+                row['Ticker'],
+                row['Open'],
+                row['High'],
+                row['Low'],
+                row['Close'],
+                row['Volume']
+            ))
+        
+        # Inserir indicadores técnicos
+        print("🔄 [LOAD] Inserindo indicadores técnicos...")
+        for _, row in df.iterrows():
+            cursor.execute("""
+                INSERT INTO technical_indicators (
+                    date, ticker, close_ma_20, close_ma_50, volume_ma_10,
+                    rsi, macd, macd_signal, bb_upper, bb_middle, bb_lower,
+                    created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            """, (
+                row['Date'].date(),
+                row['Ticker'],
+                row['close_ma_20'],
+                row['close_ma_50'],
+                row['volume_ma_10'],
+                row['rsi'],
+                row['macd'],
+                row['macd_signal'],
+                row['bb_upper'],
+                row['bb_middle'],
+                row['bb_lower']
+            ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print("✅ [LOAD] Carregamento concluído com sucesso!")
+        
+        return f"Carregados {len(df)} registros reais no banco de dados"
+        
+    except Exception as e:
+        print(f"❌ [LOAD] Erro no carregamento: {str(e)}")
+        raise
+
+def update_real_metadata(**context):
+    """Atualiza metadados do pipeline real"""
+    print("🔄 [METADATA] Atualizando metadados do pipeline real...")
+    
+    try:
+        # Obter informações das tarefas anteriores
+        extract_result = context['task_instance'].xcom_pull(task_ids='extract_real_data')
+        transform_result = context['task_instance'].xcom_pull(task_ids='transform_real_data')
+        load_result = context['task_instance'].xcom_pull(task_ids='load_real_data')
+        
+        print(f"📋 [METADATA] Metadados atualizados:")
+        print(f"   - Extração: {extract_result}")
+        print(f"   - Transformação: {transform_result}")
+        print(f"   - Carregamento: {load_result}")
+        print(f"   - Timestamp: {datetime.now()}")
+        print(f"   - Pipeline: b3_real_etl_pipeline")
+        print(f"   - Status: Concluído com sucesso")
+        print(f"   - Dados: Reais da B3 (1994-2020)")
+        
+        print("✅ [METADATA] Metadados atualizados com sucesso!")
+        
+        return "Pipeline ETL real concluído com sucesso!"
+        
+    except Exception as e:
+        print(f"❌ [METADATA] Erro nos metadados: {str(e)}")
+        raise
+
+# Definir tarefas
+extract_task = PythonOperator(
+    task_id='extract_real_data',
+    python_callable=extract_real_data,
+    dag=dag,
+)
+
+transform_task = PythonOperator(
+    task_id='transform_real_data',
+    python_callable=transform_real_data,
+    dag=dag,
+)
+
+load_task = PythonOperator(
+    task_id='load_real_data',
+    python_callable=load_real_data,
+    dag=dag,
+)
+
+metadata_task = PythonOperator(
+    task_id='update_real_metadata',
+    python_callable=update_real_metadata,
+    dag=dag,
+)
+
+# Definir dependências
+extract_task >> transform_task >> load_task >> metadata_task 

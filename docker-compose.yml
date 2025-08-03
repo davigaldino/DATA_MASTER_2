@@ -63,11 +63,12 @@ services:
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:password@postgres:5432/airflow
-      - AIRFLOW__CORE__FERNET_KEY=your-fernet-key-here
+      - AIRFLOW__CORE__FERNET_KEY=HfiIx-FQYqRXvaEYjqv036F_E1T1ZTNbHh5E1U9cFmo=
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__WEBSERVER__SECRET_KEY=your-secret-key-here
     volumes:
       - ./etl/dags:/opt/airflow/dags
+      - ./etl:/opt/airflow/etl
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
     ports:

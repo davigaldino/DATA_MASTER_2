@@ -27,6 +27,7 @@ urlpatterns = [
     path('api/', include('apps.stocks.urls')),
     path('dashboard/', include('apps.dashboard.urls')),
     path('etl-demo/', include('apps.etl_demo.urls')),
+    path('dashboard/airflow-demo/', include('apps.airflow_demo.urls')),
     path('accounts/login/', auth_views.LoginView.as_view(template_name='registration/login.html'), name='login'),
     path('accounts/logout/', auth_views.LogoutView.as_view(), name='logout'),
 ]

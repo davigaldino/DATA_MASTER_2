@@ -36,7 +36,7 @@ def etl_dashboard(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def start_etl(request):
-    """Inicia a execução do ETL em background."""
+    """Inicia a execução do ETL via Apache Airflow."""
     global etl_progress
     
     try:
@@ -49,7 +49,7 @@ def start_etl(request):
         # Reset progress
         etl_progress.update({
             'status': 'running',
-            'current_step': 'Iniciando ETL...',
+            'current_step': 'Disparando pipeline no Apache Airflow...',
             'progress': 0,
             'total_steps': 4,
             'logs': [],
@@ -59,24 +59,64 @@ def start_etl(request):
             'errors': []
         })
         
-        # Inicia ETL em thread separada
-        thread = threading.Thread(
-            target=run_etl_background,
-            args=(tickers, start_date, end_date, include_indicators)
-        )
-        thread.daemon = True
-        thread.start()
+        # Importar cliente do Airflow
+        from .airflow_client import airflow_client
         
-        # Log para debug
-        logger.info(f"Thread ETL iniciada com tickers: {tickers}, start_date: {start_date}, end_date: {end_date}")
+        # Configuração para o DAG
+        dag_config = {
+            'tickers': tickers if isinstance(tickers, list) else [tickers],
+            'start_date': start_date,
+            'end_date': end_date,
+            'include_indicators': include_indicators
+        }
         
-        return JsonResponse({
-            'status': 'success',
-            'message': 'ETL iniciado com sucesso'
-        })
+        # Disparar DAG no Airflow
+        dag_response = airflow_client.trigger_dag('b3_etl_manual_pipeline', conf=dag_config)
+        
+        if dag_response:
+            # Armazenar informações da execução
+            etl_progress['dag_run_id'] = dag_response.get('dag_run_id')
+            etl_progress['dag_id'] = dag_response.get('dag_id')
+            
+            # Inicia monitoramento em thread separada
+            thread = threading.Thread(
+                target=monitor_airflow_dag,
+                args=(tickers, start_date, end_date, include_indicators)
+            )
+            thread.daemon = True
+            thread.start()
+            
+            logger.info(f"DAG disparado com sucesso: {dag_response.get('dag_run_id')}")
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Pipeline disparado no Apache Airflow com sucesso',
+                'dag_run_id': dag_response.get('dag_run_id')
+            })
+        else:
+            # Fallback: executar ETL localmente se Airflow falhar
+            logger.warning("Falha na comunicação com Airflow, executando ETL localmente")
+            
+            # Inicia ETL local em thread separada
+            thread = threading.Thread(
+                target=run_etl_background,
+                args=(tickers, start_date, end_date, include_indicators)
+            )
+            thread.daemon = True
+            thread.start()
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Pipeline executado localmente (Airflow indisponível)'
+            })
         
     except Exception as e:
         logger.error("Erro ao iniciar ETL", error=str(e))
+        etl_progress.update({
+            'status': 'error',
+            'current_step': f'Erro: {str(e)}',
+            'errors': [str(e)]
+        })
         return JsonResponse({
             'status': 'error',
             'message': f'Erro ao iniciar ETL: {str(e)}'
@@ -98,8 +138,105 @@ def get_etl_progress(request):
         'errors': etl_progress['errors']
     })
 
+def monitor_airflow_dag(tickers, start_date, end_date, include_indicators):
+    """Monitora a execução do DAG no Apache Airflow."""
+    global etl_progress
+    
+    try:
+        from .airflow_client import airflow_client
+        
+        dag_id = 'b3_etl_manual_pipeline'
+        dag_run_id = etl_progress.get('dag_run_id')
+        
+        if not dag_run_id:
+            logger.error("DAG Run ID não encontrado")
+            return
+        
+        # Monitorar progresso das tarefas
+        tasks = ['extract_data', 'transform_data', 'load_data', 'update_metadata']
+        current_task_index = 0
+        
+        while current_task_index < len(tasks):
+            # Obter status do DAG
+            dag_status = airflow_client.get_dag_status(dag_id, dag_run_id)
+            
+            if not dag_status:
+                logger.error("Não foi possível obter status do DAG")
+                break
+            
+            state = dag_status.get('state', 'unknown')
+            
+            # Atualizar progresso baseado no estado
+            if state == 'running':
+                # Verificar tarefa atual
+                for i, task_id in enumerate(tasks):
+                    task_status = airflow_client.get_task_status(dag_id, dag_run_id, task_id)
+                    
+                    if task_status:
+                        task_state = task_status.get('state', 'unknown')
+                        
+                        if task_state == 'running':
+                            current_task_index = i
+                            progress = int((i / len(tasks)) * 100)
+                            
+                            etl_progress.update({
+                                'current_step': f'Executando {task_id}...',
+                                'progress': progress,
+                                'logs': etl_progress['logs'] + [f"🔄 Executando tarefa: {task_id}"]
+                            })
+                            break
+                        elif task_state == 'success':
+                            current_task_index = i + 1
+                            progress = int((current_task_index / len(tasks)) * 100)
+                            
+                            etl_progress.update({
+                                'current_step': f'Tarefa {task_id} concluída',
+                                'progress': progress,
+                                'logs': etl_progress['logs'] + [f"✅ Tarefa concluída: {task_id}"]
+                            })
+                        elif task_state == 'failed':
+                            etl_progress.update({
+                                'status': 'error',
+                                'current_step': f'Erro na tarefa {task_id}',
+                                'errors': etl_progress['errors'] + [f"Falha na tarefa {task_id}"],
+                                'end_time': datetime.now()
+                            })
+                            return
+                
+            elif state == 'success':
+                etl_progress.update({
+                    'status': 'completed',
+                    'current_step': 'Pipeline ETL concluído com sucesso!',
+                    'progress': 100,
+                    'records_processed': len(tickers) * 252,  # Estimativa
+                    'end_time': datetime.now(),
+                    'logs': etl_progress['logs'] + ['🎉 Pipeline ETL concluído com sucesso!']
+                })
+                break
+                
+            elif state == 'failed':
+                etl_progress.update({
+                    'status': 'error',
+                    'current_step': 'Pipeline ETL falhou',
+                    'errors': etl_progress['errors'] + ['Pipeline falhou no Airflow'],
+                    'end_time': datetime.now()
+                })
+                break
+            
+            # Aguardar antes da próxima verificação
+            time.sleep(2)
+        
+    except Exception as e:
+        logger.error("Erro durante monitoramento do DAG", error=str(e))
+        etl_progress.update({
+            'status': 'error',
+            'current_step': f'Erro no monitoramento: {str(e)}',
+            'errors': etl_progress['errors'] + [str(e)],
+            'end_time': datetime.now()
+        })
+
 def run_etl_background(tickers, start_date, end_date, include_indicators):
-    """Executa o ETL em background."""
+    """Executa o ETL em background (método legado)."""
     global etl_progress
     
     try:

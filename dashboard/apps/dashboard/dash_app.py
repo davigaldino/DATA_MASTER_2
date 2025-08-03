@@ -200,12 +200,12 @@ def update_data_on_period_change(period, ticker):
         if not data:
             # Fallback para dados simulados
             print("API não disponível, usando dados simulados")
-            data = generate_sample_data(ticker, start_date, end_date)
+            data = generate_sample_data(ticker, start_date, end_date, period=period)
         
         return data
     except Exception as e:
         print(f"Erro ao carregar dados: {e}")
-        return generate_sample_data(ticker, start_date, end_date)
+        return generate_sample_data(ticker, start_date, end_date, period=period)
 @callback(
     Output('ticker-dropdown', 'options'),
     Output('ticker-dropdown', 'value'),
@@ -721,13 +721,36 @@ def fetch_real_data(ticker, start_date=None, end_date=None, period=None):
         return []
 
 
-def generate_sample_data(ticker, start_date, end_date):
+def generate_sample_data(ticker, start_date, end_date, period=None):
     """Gera dados de exemplo para demonstração."""
     import numpy as np
+    
+    # Se period for fornecido, calcular datas baseado no período
+    if period:
+        base_date = datetime(2017, 12, 31)  # Fim de 2017
+        
+        if period == '1m':
+            start_date = base_date - timedelta(days=30)
+        elif period == '3m':
+            start_date = base_date - timedelta(days=90)
+        elif period == '6m':
+            start_date = base_date - timedelta(days=180)
+        elif period == '1y':
+            start_date = base_date - timedelta(days=365)
+        elif period == '2y':
+            start_date = base_date - timedelta(days=730)
+        elif period == '5y':
+            start_date = base_date - timedelta(days=1825)
+        else:
+            start_date = base_date - timedelta(days=365)
+        
+        end_date = base_date
     
     # Converte strings para datetime
     start = pd.to_datetime(start_date)
     end = pd.to_datetime(end_date)
+    
+    print(f"Gerando dados simulados para período: {period} - {start.date()} a {end.date()}")
     
     # Gera datas
     dates = pd.date_range(start=start, end=end, freq='D')
